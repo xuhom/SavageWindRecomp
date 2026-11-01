@@ -41,28 +41,26 @@ mouse, and its text and voices in any of its languages.
   `~/.local/share/savagewind/`. The game writes a new one each time it starts, so take it right after the bug.
 - Reports missing any of these get a `needs-info` label and are closed after 7 days without it.
 
-## Getting started (Alpha 3)
+## Getting started (Alpha 4)
 
 **You need:** a 64-bit CPU with SSE4.2 (AVX2 runs faster), a GPU with a Vulkan 1.3 driver, and 16 GB of RAM. With
 integrated graphics, which share the PC's RAM, 8 GB isn't enough: the game's 3 GB of memory has to stay available
 to the GPU ([#117](https://github.com/Revivedx/SavageWindRecomp/issues/117)).
 
 1. Download from [Releases](https://github.com/Revivedx/SavageWindRecomp/releases):
-   - **Windows:** `SavageWind-0.3.1-alpha.3-windows.zip`. Extract it to a folder you can write to (not Program
-     Files): your game files, saves and settings are kept in that folder. 0.3.1 is a hotfix for AMD and Intel
-     graphics on Windows (a black window in 0.3.0, [#85](https://github.com/Revivedx/SavageWindRecomp/issues/85)); on
-     NVIDIA it runs exactly as 0.3.0.
-   - **Linux (x86-64, Steam Deck too):** `Savage_Wind-0.3.0-alpha.3-x86_64.AppImage`. Make it executable
+   - **Windows:** `SavageWind-0.4.0-alpha.4-windows.zip`. Extract it to a folder you can write to (not Program
+     Files): your game files, saves and settings are kept in that folder.
+   - **Linux (x86-64, Steam Deck too):** `Savage_Wind-0.4.0-alpha.4-x86_64.AppImage`. Make it executable
      (`chmod +x`) and run it; your game files, saves and settings go to `~/.local/share/savagewind`. See
      [docs/linux.md](docs/linux.md).
-   - **Linux on ARM (aarch64):** `Savage_Wind-0.3.0-alpha.3-aarch64.AppImage` is **highly experimental**: it has
-     never run on real ARM hardware. Reports from real hardware are welcome ([docs/linux.md](docs/linux.md),
-     "Testing on ARM").
+   - **Linux on ARM (aarch64):** `Savage_Wind-0.4.0-alpha.4-aarch64.AppImage` is **highly experimental**: so far
+     only a few contributors' boards have run it. Reports from real hardware are welcome
+     ([docs/linux.md](docs/linux.md), "Testing on ARM").
 2. Run `savagewind.exe` (or the AppImage). The first time it asks for your game files: pick the folder with your own
    extracted game (`exefs/` and `romfs/`, version 1.9.0, see below) and choose **Set up game files**. It checks the
    version, copies the files and recompiles the game code on your machine - once (about 6
    minutes for the game code with a 12-thread CPU, plus the copy and the optional shader precompilation). Your own
-   files aren't changed. When it's done the game starts. For the DLC (from the next release), see
+   files aren't changed. When it's done the game starts. For the DLC, see
    [The DLC](#the-dlc).
 3. From then on Savage Wind goes straight into the game. The settings, including the text and voice languages,
    are in the game's Options (pause menu > System > Options, or Options on the title screen).
@@ -71,9 +69,9 @@ to the GPU ([#117](https://github.com/Revivedx/SavageWindRecomp/issues/117)).
    files (set them up again, rebuild the game code, delete them) and Quit. In game, Quit to Start Screen also comes
    back to it.
 
-Coming from Alpha 2: extract Alpha 3 to a new folder and set the game files up again with your 1.9.0 files (the game
-code has to be built again); copy your `save` folder over to keep your progress. What's new is in
-[CHANGELOG.md](CHANGELOG.md).
+Coming from Alpha 3: extract Alpha 4 over your Alpha 3 folder (Windows) or use the new AppImage (Linux). Your game
+files, saves and settings stay; the start screen asks you to build the game code again (Set up game files) once.
+What's new is in [CHANGELOG.md](CHANGELOG.md).
 
 To keep game files, saves and caches on another drive, see [Moving the data folder](docs/data-folder.md).
 
@@ -111,9 +109,8 @@ Played on the Wii U or in Cemu? Savage Wind Configuration can import that save: 
   console:
   - the **ExeFS** of that version (`main`, `main.npdm`, `rtld`, `sdk`, `subsdk0`)
   - the **RomFS** with that update applied (base game and update merged)
-- Optional, from the next release (Alpha 4; on the `test` branch now): the DLC, *The Master Trials* and *The
-  Champions' Ballad*, from your own copy: the **RomFS** of each of the two DLC, version 3.0 (see
-  [The DLC](#the-dlc) below).
+- Optional: the DLC, *The Master Trials* and *The Champions' Ballad*, from your own copy: the **RomFS** of each of
+  the two DLC, version 3.0 (see [The DLC](#the-dlc) below).
 - Windows 10 or later or Linux, on x86-64 (a CPU with SSE4.2; without AVX2 / FMA the game code runs in a slower
   compatible mode), and a GPU with Vulkan 1.3.
 
@@ -182,13 +179,13 @@ Estimates of where each part stands. "Tested in game" is how much of the game ha
 | ✅ | **Higher-resolution shadows** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Sun shadows at the console's 896x896, or sharper at 2048, 4096 or 8192 (Video > Shadow resolution) |
 | ✅ | **Shader and pipeline cache** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Places you've already seen don't stutter again |
 | ✅ | **Full shader precompilation** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Optional and on by default, at setup or later in Savage Wind Configuration: all of the game's ~14,000 shaders are translated and compiled ahead of time, so new places and effects don't stutter the first time |
-| ✅ | **Faster game code build** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | The one-time setup takes about 15 minutes instead of about 40 (12 threads) from the next release: the game code builds in about 6 minutes instead of 30 ([#43](https://github.com/Revivedx/SavageWindRecomp/pull/43), by [@adriadam10](https://github.com/adriadam10)) |
+| ✅ | **Faster game code build** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | The one-time setup takes about 15 minutes instead of about 40 (12 threads): the game code builds in about 6 minutes instead of 30 ([#43](https://github.com/Revivedx/SavageWindRecomp/pull/43), by [@adriadam10](https://github.com/adriadam10)) |
 | ✅ | **Frame rate** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | 60 fps by default, or 30, 90, 120 or no limit, with the game at the same speed; menus, cutscenes and conversations too, and videos at their own speed |
 | ✅ | **Field of view** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Video > Field of view: 70% to 150% of the game's own in play; cutscenes and conversations keep theirs |
 | ✅ | **Draw distance** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Video > Draw distance: Original (the game's own), Medium or High. Trees, rocks, buildings, enemies and villagers appear further out (1.5x at Medium, 1.6x at High, up to 2 km), buildings keep their full models further before their far versions take over, and distant landmarks such as Hyrule Castle and the terrain's distant trees stay drawn 1.5x as far. The grass reaches further too: the short grass 1.6x (Medium) or 2.5x (High), the tall grass about 1.15x or 2.45x. The terrain's own detail levels stay the game's ([#88](https://github.com/Revivedx/SavageWindRecomp/issues/88)) |
 | ✅ | **Steady 60 fps in the open world** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Holds 60 fps in real play on the Great Plateau (RTX 3060, Ryzen 5 5600X); steady 120 fps (8 ms frames) is the next goal |
 | ✅ | **Game version 1.9.0** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | The latest version and the supported one (its Thai text isn't offered yet). 1.8.2 still sets up and runs, but isn't supported: a bug is only fixed if it also happens on 1.9.0 |
-| ✅ | **DLC** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | *The Master Trials* and *The Champions' Ballad* from your own copy, set up with the game files or later ([The DLC](#the-dlc)), from the next release: Master Mode, the Trial of the Sword and the Travel Medallion work on a 100% save. The Champions' Ballad has been played through. |
+| ✅ | **DLC** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | *The Master Trials* and *The Champions' Ballad* from your own copy, set up with the game files or later ([The DLC](#the-dlc)): Master Mode, the Trial of the Sword and the Travel Medallion work on a 100% save. The Champions' Ballad has been played through. |
 | ✅ | **Variable refresh rate (VRR)** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | Video > VSync: On lets G-SYNC and FreeSync displays show every frame as soon as it's ready, a little under the refresh rate; Fast (the default), Adaptive and Off too. Tried on a VRR display |
 | ✅ | **Motion controls (gyro)** | ![100%](https://progress-bar.xyz/100/?width=150&style=square&progress_color=5cb85c) | The controller's gyroscope and accelerometer (DualSense, DualShock 4, Switch controllers, Steam Deck) for motion aiming and the tilt shrines; without one, hold T and move the mouse to tilt. Sensitivity and inversion in Options > Controls. Confirmed by players with real controllers |
 | 🔧 | **Horizon OS services** | ![90%](https://progress-bar.xyz/90/?width=150&style=square&progress_color=5cb85c) | Threads, files, controllers, applets and time: all the opening and the Great Plateau use |
