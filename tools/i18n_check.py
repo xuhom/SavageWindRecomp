@@ -16,11 +16,12 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCES = sorted(glob.glob(os.path.join(ROOT, 'runtime/ui/*.mm'))) + [
+# (console.mm is left out: the console is English, like the command names and replies it shows)
+SOURCES = sorted(p for p in glob.glob(os.path.join(ROOT, 'runtime/ui/*.mm')) if not p.endswith('console.mm')) + [
     os.path.join(ROOT, 'runtime/language.c'),
     os.path.join(ROOT, 'runtime/hle/bindings.c'),
 ]
-SKIP_LINE = re.compile(r'\b(LOG|fprintf|printf|getenv|strcmp|strncmp|memcmp|strstr|fopen|file_exists|mkdir|unlink|rt_resource|'
+SKIP_LINE = re.compile(r'\b(LOG|fprintf|printf|getenv|strcmp|strncmp|memcmp|strstr|fopen|file_exists|mkdir|unlink|rt_resource|rt_remove_game_file|'
                        r'PushID|BeginChild|BeginTable|BeginPopup|OpenPopup|IsPopupOpen|InvisibleButton|GetID|Begin)\s*\(|'
                        r'#include|#define|SAVAGEWIND_|//')
 
@@ -98,6 +99,11 @@ def keys():
             if SKIP_LINE.search(src.split('"')[0]) or not looks_like_text(s, 'tr(' in src):
                 continue
             found.setdefault(s, f'{os.path.relpath(path, ROOT)}:{ln}')
+    # the colour presets' names (runtime/color_grade.c g_color_presets: shown through tr() by both menus)
+    path = os.path.join(ROOT, 'runtime/color_grade.c')
+    text = open(path, encoding='utf-8').read()
+    for m in re.finditer(r'^\s*\{"([^"]+)", -?\d', text, re.M):
+        found.setdefault(m.group(1), f'{os.path.relpath(path, ROOT)}:{text[:m.start()].count(chr(10)) + 1}')
     return found
 
 
