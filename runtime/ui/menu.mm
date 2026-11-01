@@ -1402,9 +1402,25 @@ void menu_tabs_draw(float scale, ImFont *font, ImFont *font_big, bool in_game, v
     g_font = f0, g_font_big = f1;
 }
 
-bool menu_render_needed(void) {
-    return g_open.load() || g_kbd.load() == 1 || g_sizes.load() || g_settings.perf_overlay != PERF_OFF;
+#ifndef __APPLE__
+extern "C" void rec_drain(void);  // (runtime/nvn/vulkan/record.c)
+#endif
+
+// Everything menu_render draws, in one place: menu_render_needed (the caller's cue to drain the recorder first) and
+// menu_render (which decides again, and drains itself) must agree on it. The pointer's hover box, the console and the
+// gyro drag were missing here: their frames went to the command buffer while the recorder thread was still filling it.
+static bool menu_draws(bool *pointer_hover = NULL, float *pointer_box = NULL, bool *gyro_show = NULL, GyroScene *gyro = NULL) {
+    float box[4];
+    GyroScene gs;
+    bool hover = pc_cursor_hover_box(pointer_box ? pointer_box : box);
+    bool gyro_on = pc_gyro_scene_view(gyro ? gyro : &gs);
+    if (pointer_hover) *pointer_hover = hover;
+    if (gyro_show) *gyro_show = gyro_on;
+    return g_open.load() || g_kbd.load() == 1 || g_sizes.load() || console_is_open() || gyro_on || hover ||
+           g_settings.perf_overlay != PERF_OFF;
 }
+
+bool menu_render_needed(void) { return menu_draws(); }
 
 #ifdef __APPLE__
 void menu_render(id<MTLDevice> dev, id<MTLCommandBuffer> cb, id<MTLTexture> target) {
@@ -1419,13 +1435,19 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     bool con = console_is_open();
     console_collect();
     GyroScene gyro_scene;
-    bool gyro_scene_show = pc_gyro_scene_view(&gyro_scene);
+    bool gyro_scene_show;
     float pointer_box[4];
-    bool pointer_hover = pc_cursor_hover_box(pointer_box);
-    if (!open && !kbd && !sizes && !con && !gyro_scene_show && !pointer_hover && g_settings.perf_overlay == PERF_OFF) {
+    bool pointer_hover;
+    if (!menu_draws(&pointer_hover, pointer_box, &gyro_scene_show, &gyro_scene)) {
         if (g_inited) { pthread_mutex_lock(&q_lock); q_events.clear(); pthread_mutex_unlock(&q_lock); }
         return;
     }
+#ifndef __APPLE__
+    // ImGui records into the frame's command buffer from this thread, which is the recorder's until it has caught up.
+    // The caller drains when menu_render_needed said so, but the pointer's hover box can appear (and the console and
+    // the gyro drag can open) between that call and this one: draining again here is cheap when nothing is queued.
+    rec_drain();
+#endif
 #ifdef __APPLE__
     if (!g_inited) init(dev);
 #else

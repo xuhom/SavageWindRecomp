@@ -18,6 +18,7 @@ static _Atomic int quantity_value,quantity_max,quantity_request=-1;
 static _Atomic bool quantity_edit,quantity_replace;
 static uint64_t quantity_screen;
 static uint64_t shop_screen;
+static uint64_t game_over_screen;
 static bool ptr(uint64_t p);
 static bool preview_defaults_saved;
 static float preview_defaults[2];
@@ -49,10 +50,11 @@ static float options_scroll;
 static bool options_keyboard;
 static float options_keyboard_point[2];
 static _Atomic bool pointer_keyboard_input;
+static _Atomic bool pointer_gamepad_input;
 static _Atomic uint64_t pointer_mouse_events;
 static uint64_t options_keyboard_mouse_events;
 static bool options_page_pending;
-static _Atomic bool quick_confirmed;
+static _Atomic bool quick_wheel_only;
 static _Atomic uint64_t confirm_until, hover_until, hover_rect[2], motion_at;
 static bool map_down, map_dragged;
 static float map_origin[2],map_last[2];
@@ -82,13 +84,24 @@ static bool enabled(void) {
 bool pc_cursor_enabled(void) { return enabled(); }
 extern bool menu_cursor_free(void);
 bool pc_cursor_active(void) { return enabled() && active && (focused || pointer_test()) && !menu_cursor_free(); }
-bool pc_cursor_map_navigation(void) { return pc_cursor_active() && map_canvas_active; }
+bool pc_cursor_map_navigation(void) { return pc_cursor_active() && map_canvas_active && !pointer_gamepad_input; }
 bool pc_cursor_hide_system(void) {
-    return position_inside&&(pc_cursor_map_navigation()||(pc_cursor_active()&&pointer_keyboard_input));
+    return (pc_cursor_active()&&quick_wheel_only)||
+        (position_inside&&(pc_cursor_map_navigation()||(pc_cursor_active()&&pointer_keyboard_input)));
+}
+static void map_release_to_controller(void) {
+    map_down=map_dragged=false;map_anchor_active=map_picker_seen=false;
+    map_canvas_active=map_view_valid=map_sent_valid=map_native_snapped=false;
+    map_nav_ns=map_select_until=0;map_snap_button=0;map_zooming=false;
+    click_pending=false;
 }
 
 void pc_cursor_frame(void) {
-    bool dialogue=false;shop_screen=0;
+    // Invalidate cached mouse state even when the pointer is outside the
+    // window and the native manager hook has no reason to run this frame.
+    if(pointer_gamepad_input)map_release_to_controller();
+    uint64_t game_over_modal=0;
+    bool dialogue=false,quick=false;shop_screen=game_over_screen=0;
     if(g_site.screen_mgr) {
         uint64_t mgr=LD64(g_site.screen_mgr),arr=mgr?LD64(mgr+0x30):0;
         unsigned count=mgr?LD32(mgr+0x28):0;
@@ -96,12 +109,19 @@ void pc_cursor_frame(void) {
         // not stable identifiers (AkashNum is the spirit-orb counter).
         if(arr)for(unsigned i=0;i<count&&i<256;i++) {
             uint64_t text=LD64(arr+8*i);
-            if(!text||LD8(text+0xfe)!=2)continue;
+            if(!text)continue;
+            if(i==0x2d&&g_site.pause_state&&LD32(g_site.pause_state)==4&&LD64(text)==0x7001cf51d8ull)quick=true;
+            if(LD8(text+0xfe)!=2)continue;
+            if(i==0x30&&LD64(text)==0x7001cef0a8ull)game_over_screen=text;
+            if(i==0x39&&LD64(text)==0x7001cfffe0ull)game_over_modal=text;
             if(LD64(text)==0x7001d4ed48ull)dialogue=true;
             uint64_t name=LD64(text+0xd0);
             if(name>=GUEST_LO&&name<GUEST_HI-32&&!strncmp((char*)(uintptr_t)name,"ShopBtnList",11))shop_screen=text;
         }
     }
+    // Quit opens a native SystemWindow over Game Over. Only its buttons
+    // own pointer input until it closes; then focus returns to Continue/Quit.
+    if(game_over_screen&&game_over_modal)game_over_screen=game_over_modal;
     if(preview_defaults_saved) {
         uint64_t m=LD64(g_site.screen_mgr),a=ptr(m)?LD64(m+0x30):0;
         uint64_t inv=ptr(a)?LD64(a+8*0x2e):0;
@@ -112,9 +132,12 @@ void pc_cursor_frame(void) {
     }
     if(dialogue_active&&!dialogue)confirm_until=0;
     dialogue_active=dialogue;
-    bool ui = g_site.pause_state &&
-        (dialogue || shop_screen || framepace_menu_ui() || framepace_title_ui() || *(uint32_t *)(uintptr_t)g_site.pause_state == 4);
+    if(game_over_screen){dialogue_active=false;shop_screen=0;}
+    bool ui = game_over_screen || (g_site.pause_state &&
+        (dialogue || shop_screen || framepace_menu_ui() || framepace_title_ui() || *(uint32_t *)(uintptr_t)g_site.pause_state == 4));
     active = enabled() && ui;
+    quick_wheel_only=enabled()&&quick;
+    if(quick_wheel_only){hover_leave();hover_until=0;click_pending=false;held=false;gesture_down=gesture_dragged=false;}
     if(!pc_cursor_active()){
         hover_leave();
         options_scroll_valid=false;options_screen_active=options_rows_active=0;
@@ -238,8 +261,30 @@ bool pc_cursor_event(const SDL_Event *e) {
     if(e->type==SDL_EVENT_MOUSE_BUTTON_UP&&e->button.button==SDL_BUTTON_RIGHT&&right_back_held) {
         input_pc_escape(false);right_back_held=false;return true;
     }
+    // Remember real controller activity even before a menu opens: the button
+    // which opens the map must not start it under a stationary mouse's control.
+    bool pad_input=e->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    if(e->type==SDL_EVENT_GAMEPAD_AXIS_MOTION&&e->gaxis.axis<=SDL_GAMEPAD_AXIS_RIGHTY) {
+        float deadzone=g_settings.stick_deadzone[e->gaxis.axis>=SDL_GAMEPAD_AXIS_RIGHTX];
+        int threshold=(int)(32767*fmaxf(.12f,deadzone));
+        pad_input=abs(e->gaxis.value)>threshold;
+    }
+    if(pad_input) {
+        pointer_gamepad_input=pointer_keyboard_input=true;
+        hover_until=confirm_until=0;wheel=0;held=false;releases++;
+        quantity_edit=false;
+    } else if(e->type==SDL_EVENT_KEY_DOWN||e->type==SDL_EVENT_MOUSE_BUTTON_DOWN||
+              e->type==SDL_EVENT_MOUSE_WHEEL||
+              (e->type==SDL_EVENT_MOUSE_MOTION&&(e->motion.xrel!=0||e->motion.yrel!=0))) {
+        pointer_gamepad_input=false;
+    }
     if (!enabled()) return false;
     if (!pc_cursor_active()) return false;
+    // The quick selector has no absolute pointer target. Ignore movement and
+    // clicks, but leave the wheel and the native keyboard/controller paths live.
+    if(quick_wheel_only&&(e->type==SDL_EVENT_MOUSE_MOTION||
+       ((e->type==SDL_EVENT_MOUSE_BUTTON_DOWN||e->type==SDL_EVENT_MOUSE_BUTTON_UP)&&
+        (e->button.button==SDL_BUTTON_LEFT||e->button.button==SDL_BUTTON_RIGHT))))return true;
     if(quantity_edit&&plat_now_ns()<quantity_until&&(e->type==SDL_EVENT_KEY_DOWN||e->type==SDL_EVENT_KEY_UP)) {
         if(e->type==SDL_EVENT_KEY_UP)return true;
         SDL_Scancode sc=e->key.scancode;int digit=-1;
@@ -257,9 +302,7 @@ bool pc_cursor_event(const SDL_Event *e) {
     }
     // Native Options captures game buttons, so input_buttons_now() may be
     // zero even while a navigation key is down. Track the real SDL source.
-    if(e->type==SDL_EVENT_KEY_DOWN||e->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN||
-       (e->type==SDL_EVENT_GAMEPAD_AXIS_MOTION&&
-        e->gaxis.axis<=SDL_GAMEPAD_AXIS_RIGHTY&&abs(e->gaxis.value)>16000)) {
+    if(e->type==SDL_EVENT_KEY_DOWN||pad_input) {
         pointer_keyboard_input=true;hover_until=0;
     }
     if((e->type==SDL_EVENT_MOUSE_MOTION&&(e->motion.xrel!=0||e->motion.yrel!=0))||
@@ -290,6 +333,7 @@ bool pc_cursor_event(const SDL_Event *e) {
 // Entry hook, before the original prologue: preserve the game's group and provide its native pointer arguments.
 void rt_pc_button_group(Cpu *c) {
     if (!pc_cursor_active()) return;
+    if(quick_wheel_only)return;
     sample_pointer();
     inventory_pointer(c);
     extern uint64_t renderer_present_count(void);
@@ -505,10 +549,6 @@ static bool options_pointer(Cpu *c,uint64_t screens,uint64_t bounds) {
 }
 
 uint64_t pc_cursor_buttons(uint64_t b) {
-    if(quick_confirmed) {
-        if(!(b&(1ull<<14)))quick_confirmed=false;
-        b&=~(1ull<<14);
-    }
     if(plat_now_ns()<confirm_until)b|=1;
     return b;
 }
@@ -644,27 +684,26 @@ static bool native_special(Cpu *c,uint64_t screens,uint64_t bounds) {
     bool inventory=ptr(LD64(screens+8*0x2f));
     bool is_map=pause==2&&!inventory&&ptr(screen)&&LD8(screen+0xfe)==2&&LD64(screen)==0x7001ce8298ull;
     if(!is_map&&!is_quick){map_down=false;map_anchor_active=map_picker_seen=false;map_canvas_active=false;map_view_valid=map_sent_valid=map_native_snapped=false;map_nav_ns=0;return false;}
+    if(pointer_gamepad_input) {
+        // Leave the original cursor/pan/zoom helpers in charge. In particular,
+        // never restore the PC viewport or write the mouse cursor over a stick.
+        map_release_to_controller();return false;
+    }
     if(special_frame==f)return true;
     special_frame=f;
     uint64_t nav_now=plat_now_ns();
     float nav_dt=map_nav_ns&&nav_now>map_nav_ns?(float)(nav_now-map_nav_ns)/1e9f:0;
     map_nav_ns=nav_now;map_canvas_active=false;
     if(is_quick) {
-        bool clicked=click_pending;click_pending=false;
+        click_pending=false;hover_until=0;
         uint64_t list=LD64(quick+0x37a8);
-        if(!ptr(list)||quick_confirmed)return true;
-        int count=(int)LD32(quick+0x3880),hit=-1;
+        if(!ptr(list))return true;
+        int count=(int)LD32(quick+0x3880);
         if(count<1||count>20)return true;
         int selected=-1,total=(int)LD32(list+0x2ac);
         if(total<1||total>21)total=count+1;
         for(int i=0;i<total;i++)if(LD32(quick+0x3884+4*i)==LD32(quick+0x387c))selected=i;
         int scroll=atomic_exchange(&wheel,0);
-        static float drag;
-        if(frame_press)drag=0;
-        if(gesture_down&&gesture_dragged) {
-            drag+=gesture_delta[0];
-            if(fabsf(drag)>=47){scroll=(int)roundf(drag/94);drag-=scroll*94;}
-        }
         if(scroll&&selected>=0) {
             int next=selected-scroll;if(next<0)next=0;if(next>=total)next=total-1;
             if(next!=selected) {
@@ -672,22 +711,6 @@ static bool native_special(Cpu *c,uint64_t screens,uint64_t bounds) {
                 call(c,0x7000e2785c,quick,next,0);
                 if(getenv("SAVAGEWIND_PC_CURSOR_LOG"))LOG("[pc-quick-scroll] slot %d -> %d pending %d\n",selected,next,(int)LD32(quick+0x387c));
             }
-        }
-        for(int i=0;i<=20;i++) {
-            uint64_t entry=call(c,0x7000d6fe80,list,i,0);
-            uint64_t child=ptr(entry)?LD64(entry+0x10):0;
-            uint64_t pane=ptr(child)?LD64(child+0x60):0;
-            if(!ptr(pane)&&ptr(child))pane=LD64(child+0x58);
-            if(!ptr(pane))continue;
-            float x=*(float*)(pane+0x7c),y=*(float*)(pane+0x8c);
-            if(getenv("SAVAGEWIND_PC_CURSOR_LOG")&&clicked)LOG("[pc-quick-rect] index %d name %.24s center %.1f %.1f\n",i,(char*)(pane+0xb8),x,y);
-            if(isfinite(x)&&isfinite(y)&&fabsf(point[0]-x)<42&&fabsf(point[1]-y)<42){hit=i;set_hover(x,y,40);}
-        }
-        if(hit>=0&&clicked) {
-            // Preserve the old selection: release of Right invokes the game's normal equip path using pending.
-            call(c,0x7000e2785c,quick,hit,0);
-            quick_confirmed=true;
-            if(getenv("SAVAGEWIND_PC_CURSOR_LOG"))LOG("[pc-quick-click] slot %d pending %d previous %d\n",hit,(int)LD32(quick+0x387c),(int)LD32(quick+0x3878));
         }
         return true;
     }
@@ -1189,7 +1212,7 @@ void rt_pc_cursor_manager(Cpu *c, uint64_t activate, uint64_t bounds) {
     }
     if (!pc_cursor_active()) return;
     sample_pointer();
-    if (!pointer_test() && !position_inside) {
+    if (!quick_wheel_only && !pointer_test() && !position_inside) {
         float keys[2];extern void input_pc_map_axes(float out[2]);input_pc_map_axes(keys);
         if(keys[0]==0&&keys[1]==0)return;
     }
@@ -1200,12 +1223,14 @@ void rt_pc_cursor_manager(Cpu *c, uint64_t activate, uint64_t bounds) {
     if(!ptr(control)||!ptr(screen_mgr))return;
     uint64_t screens=LD64(screen_mgr+0x30),n=LD32(screen_mgr+0x28);
     if(n>0x2d&&ptr(screens))special_diagnostics(c,screens);
-    if(n>0x34&&ptr(screens)&&options_pointer(c,screens,bounds)){hover_leave();return;}
-    if(n>0x39&&ptr(screens)&&native_special(c,screens,bounds)){hover_leave();return;}
-    if(quantity_pointer(c,screens,n))return;
+    if(!game_over_screen) {
+        if(n>0x34&&ptr(screens)&&options_pointer(c,screens,bounds)){hover_leave();return;}
+        if(n>0x39&&ptr(screens)&&native_special(c,screens,bounds)){hover_leave();return;}
+        if(quantity_pointer(c,screens,n))return;
+    }
     if(pointer_keyboard_input){hover_leave();hover_until=0;return;}
     if(!click_pending&&!pointer_test()&&!motion_at)return;
-    if(n>0x2e&&ptr(screens)) {
+    if(!game_over_screen&&n>0x2e&&ptr(screens)) {
         uint64_t screen=LD64(screens+8*0x2e);
         if(ptr(screen)&&hover_target(c,screen,target)&&
            (pause_headers(c,screen,screens,n)||quest_categories(c,screen))){hover_leave();return;}
@@ -1217,6 +1242,7 @@ void rt_pc_cursor_manager(Cpu *c, uint64_t activate, uint64_t bounds) {
     for(unsigned id=0;id<n&&id<256&&ptr(screens);id++) {
         uint64_t screen=LD64(screens+8*id);
         if(!ptr(screen)||LD8(screen+0xfe)!=2)continue;
+        if(game_over_screen&&screen!=game_over_screen)continue;
         if(dialogue_active&&choices&&LD64(screen)!=0x7001d4ed48ull)continue;
         if(shop_screen&&!choices&&screen!=shop_screen)continue;
         if(dialogue_active&&!shop_screen&&LD64(screen)!=0x7001d4ed48ull)continue;
@@ -1300,14 +1326,15 @@ void rt_pc_cursor_manager(Cpu *c, uint64_t activate, uint64_t bounds) {
 }
 
 RT_ON_RESET(pc_cursor_reset) {
-    dialogue_active=false;shop_screen=quantity_screen=0;quantity_until=0;quantity_edit=false;quantity_request=-1;
+    dialogue_active=false;shop_screen=game_over_screen=quantity_screen=0;quantity_until=0;quantity_edit=false;quantity_request=-1;
     quantity_hold=0;quantity_repeat_at=0;preview_defaults_saved=false;sound_hover_key=sound_hover_until=0;
     hover_leave();
-    options_scroll_valid=false;options_scroll=0;options_keyboard=false;options_page_pending=false;pointer_keyboard_input=false;pointer_mouse_events=0;options_keyboard_mouse_events=0;options_screen_active=options_rows_active=0;
+    options_scroll_valid=false;options_scroll=0;options_keyboard=false;options_page_pending=false;pointer_keyboard_input=false;pointer_gamepad_input=false;pointer_mouse_events=0;options_keyboard_mouse_events=0;options_screen_active=options_rows_active=0;
     active = false; held = false; frame_press = frame_release = frame_held = false;
+    quick_wheel_only=false;
     click_pending=false;
     injected_manager=0;
-    quick_confirmed=false;confirm_until=hover_until=0;wheel=0;map_down=false;special_frame=UINT64_MAX;
+    confirm_until=hover_until=0;wheel=0;map_down=false;special_frame=UINT64_MAX;
     sampled_frame=UINT64_MAX;gesture_down=gesture_dragged=false;
     map_anchor_active=map_picker_seen=false;map_anchor_deadline=0;
     map_canvas_active=false;map_nav_ns=map_snap_button=0;map_view_valid=false;

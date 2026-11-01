@@ -2,6 +2,26 @@
 
 What changed in each Savage Wind release. The `test` branch holds what the next one will contain.
 
+## Alpha 4.1 (0.4.1-alpha.4) - 2026-11-01
+
+**A quick fix update for Alpha 4.** Extract it over your Alpha 4 folder (Windows) or use the new AppImage (Linux): your
+game files, the game code built at setup, saves and settings stay, with no new setup.
+
+- **AMD graphics on Windows:** no more "GPU page fault" and device lost at boot or in the first cutscene on AMD's
+  26.10 drivers (RX 9070 XT, RX 9060 XT, RX 7000 cards). AMD's shader compiler misread the game's memory past 2 GB in
+  one kind of shader; Savage Wind now hands it the memory in two parts, each under 2 GB. Everything stays on, the GPU
+  overlap included, so `SAVAGEWIND_GPU_OVERLAP=0` is no longer needed ([#331](https://github.com/Revivedx/SavageWindRecomp/issues/331), [#334](https://github.com/Revivedx/SavageWindRecomp/issues/334),
+  [#340](https://github.com/Revivedx/SavageWindRecomp/issues/340), [#339](https://github.com/Revivedx/SavageWindRecomp/issues/339); by conongnang). AMD players rebuild their shader cache once.
+- **Crash with the mouse in menus:** opening the inventory, switching Adventure Log tabs or changing weapons with the
+  mouse could crash with `c0000005 accessing 0xfff00000001` in the graphics driver. The pointer's highlight box was
+  drawn while the frame was still being recorded on another thread ([#333](https://github.com/Revivedx/SavageWindRecomp/issues/333), [#350](https://github.com/Revivedx/SavageWindRecomp/issues/350)).
+- **Controller on the map:** the controller takes map navigation back from the mouse as soon as you use it, and
+  opening the map with the controller no longer starts it under a still mouse ([#336](https://github.com/Revivedx/SavageWindRecomp/pull/336); by YmirxUwu).
+- **Quick weapon selector:** with the mouse, the selector now uses only the wheel, so moving or clicking the mouse no
+  longer picks a different item ([#344](https://github.com/Revivedx/SavageWindRecomp/pull/344); by YmirxUwu).
+- **Game Over screen:** the mouse now works on Continue and Quit, and on Quit's confirmation
+  ([#347](https://github.com/Revivedx/SavageWindRecomp/pull/347); by YmirxUwu).
+
 ## Alpha 4 (0.4.0-alpha.4) - 2026-10-31
 
 **The biggest update so far.** Alpha 4 adds the two DLC, runs much faster on discrete GPUs, brings a draw distance
