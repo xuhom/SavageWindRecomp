@@ -17,7 +17,8 @@ static uint64_t now=1000000000,frame=1;
 bool menu_cursor_free(void){return false;}
 uint64_t plat_now_ns(void){return now;}
 uint64_t renderer_present_count(void){return frame;}
-bool framepace_menu_ui(void){return true;}
+static bool test_menu_ui=true;
+bool framepace_menu_ui(void){return test_menu_ui;}
 bool framepace_title_ui(void){return false;}
 uint64_t framepace_script_frame(uint64_t value){return value;}
 void input_pc_escape(bool down){(void)down;abort();}
@@ -28,6 +29,8 @@ static uint64_t quest_screen,quest_widget,quest_control,quest_nodes[2],quest_ico
 static uint64_t quest_master;
 static unsigned quest_selections,quest_categories_clicked,last_category;
 static unsigned page_changes;
+static uint64_t quick_test_screen,quick_test_list;
+static unsigned quick_test_moves;
 static uint64_t navigation;
 static Cpu test_cpu;
 Cpu *kernel_current_cpu(void){return &test_cpu;}
@@ -49,7 +52,12 @@ void guest_call(Cpu *cpu,uint64_t address){
         // The detail list precedes the real row list in the screen registry.
         cpu->x[0]=cpu->x[0]!=quest_widget?UINT32_MAX:
             cpu->x[1]==quest_nodes[0]?0:cpu->x[1]==quest_nodes[1]?1:UINT32_MAX;
-    }else if(address==0x7000d6c54cull){abort();} // Hover must never select/recenter a scroll page.
+    }else if(address==0x7000d6c54cull){
+        assert(quick_test_list&&cpu->x[0]==quick_test_list&&cpu->x[1]<3);quick_test_moves++;
+    }else if(address==0x7000e2785cull){
+        assert(cpu->x[0]==quick_test_screen&&cpu->x[1]<3);
+        ST32(quick_test_screen+0x387c,LD32(quick_test_screen+0x3884+4*cpu->x[1]));
+    }
     else if(address==0x7000d6c870ull){
         assert(cpu->x[0]==quest_widget&&cpu->x[1]<2);
         unsigned index=(unsigned)cpu->x[1];quest_selections++;
@@ -387,7 +395,109 @@ int main(void) {
 #else
     munmap(yaw_memory,65536);
 #endif
+    // A controller can open the map before pointer mode is active. It must
+    // keep the native map helpers in charge, with no stale mouse restoration.
+    active=false;quantity_edit=false;pointer_gamepad_input=false;
+    event.type=SDL_EVENT_GAMEPAD_BUTTON_DOWN;event.gbutton.button=SDL_GAMEPAD_BUTTON_START;
+    assert(!pc_cursor_event(&event)&&pointer_gamepad_input);
+    active=true;map_canvas_active=true;map_view_valid=map_sent_valid=true;
+    map_down=map_anchor_active=map_picker_seen=true;click_pending=true;
+    held=true;confirm_until=now+100000000;wheel=3;
+    event.gbutton.button=SDL_GAMEPAD_BUTTON_SOUTH;
+    assert(!pc_cursor_event(&event)&&!held&&!wheel&&!confirm_until);
+    assert(!pc_cursor_map_navigation()&&rt_pc_map_focus(&cpu,0)==0);
+    uint64_t map_screen=GUEST_LO+0xf000;
+    ST32(g_site.pause_state,2);ST64(sa+8*0x2a,map_screen);ST64(sa+8*0x2f,0);
+    ST64(map_screen,0x7001ce8298ull);ST8(map_screen+0xfe,2);
+    ST32(map_screen+0x880,12345);special_frame=frame;
+    assert(!native_special(&cpu,sa,0x7000123404));
+    assert(LD32(map_screen+0x880)==12345&&!map_view_valid&&!map_canvas_active&&!map_down&&!map_anchor_active&&!click_pending);
+    // No axis event at rest or within the configured dead zone steals focus.
+    pointer_gamepad_input=pointer_keyboard_input=false;g_settings.stick_deadzone[0]=.25f;
+    event.type=SDL_EVENT_GAMEPAD_AXIS_MOTION;event.gaxis.axis=SDL_GAMEPAD_AXIS_LEFTX;
+    event.gaxis.value=2000;assert(!pc_cursor_event(&event)&&!pointer_gamepad_input);
+    event.gaxis.value=10000;assert(!pc_cursor_event(&event)&&pointer_gamepad_input&&pointer_keyboard_input);
+    map_view_valid=map_sent_valid=map_canvas_active=true;position_inside=false;
+    pc_cursor_frame();assert(!map_view_valid&&!map_sent_valid&&!map_canvas_active);
+    // Stationary/synthetic mouse motion is not a takeover; real movement is.
+    event.type=SDL_EVENT_MOUSE_MOTION;event.motion.xrel=event.motion.yrel=0;
+    assert(pc_cursor_event(&event)&&pointer_gamepad_input);
+    event.motion.xrel=1;assert(pc_cursor_event(&event)&&!pointer_gamepad_input&&!pointer_keyboard_input);
+    map_canvas_active=true;assert(pc_cursor_map_navigation()&&rt_pc_map_focus(&cpu,0)==1);
+    // WASD's pointer-map navigation remains available after controller use.
+    pointer_gamepad_input=true;event.type=SDL_EVENT_KEY_DOWN;event.key.scancode=SDL_SCANCODE_W;
+    assert(!pc_cursor_event(&event)&&!pointer_gamepad_input&&pc_cursor_map_navigation());
     pc_cursor_reset();assert(!options_scroll_valid&&!options_screen_active&&!options_rows_active);
+    assert(!pointer_gamepad_input);
+    puts("PASS: controller opens/owns map, native helper bypass, cursor-cache release outside window, stick dead zone, mouse reclaim and WASD preservation");
+    // Quick equipment: movement/click/drag cannot select; wheel moves once and
+    // clamps. The cursor is hidden even if its old absolute position is outside.
+    quick_test_screen=GUEST_LO+0xa000;quick_test_list=GUEST_LO+0xe000;
+    ST64(sa+8*0x2d,quick_test_screen);ST64(quick_test_screen,0x7001cf51d8ull);
+    ST8(quick_test_screen+0xfe,2);ST32(g_site.pause_state,4);
+    ST64(quick_test_screen+0x37a8,quick_test_list);ST32(quick_test_screen+0x3880,3);
+    ST32(quick_test_list+0x2ac,3);
+    for(int i=0;i<3;i++)ST32(quick_test_screen+0x3884+4*i,10+10*i);
+    ST32(quick_test_screen+0x387c,20);focused=true;position_inside=false;
+    pc_cursor_frame();assert(quick_wheel_only&&pc_cursor_hide_system());
+    event.type=SDL_EVENT_MOUSE_MOTION;event.motion.xrel=400;event.motion.yrel=200;
+    assert(pc_cursor_event(&event));
+    event.type=SDL_EVENT_MOUSE_BUTTON_DOWN;event.button.button=SDL_BUTTON_LEFT;
+    assert(pc_cursor_event(&event)&&!held);
+    gesture_down=gesture_dragged=true;gesture_delta[0]=500;click_pending=true;
+    frame++;assert(native_special(&cpu,sa,0));assert(!quick_test_moves&&!click_pending);
+    event.type=SDL_EVENT_MOUSE_WHEEL;event.wheel.y=-1;
+    assert(pc_cursor_event(&event));frame++;assert(native_special(&cpu,sa,0));
+    assert(quick_test_moves==1&&LD32(quick_test_screen+0x387c)==30);
+    assert(pc_cursor_event(&event));frame++;native_special(&cpu,sa,0);assert(quick_test_moves==1);
+    event.wheel.y=1;assert(pc_cursor_event(&event));frame++;native_special(&cpu,sa,0);
+    assert(quick_test_moves==2&&LD32(quick_test_screen+0x387c)==20);
+    event.type=SDL_EVENT_KEY_DOWN;event.key.scancode=SDL_SCANCODE_RIGHT;
+    assert(!pc_cursor_event(&event));assert(pc_cursor_buttons(1ull<<14)==(1ull<<14));
+    ST32(g_site.pause_state,0);ST64(sa+8*0x2d,0);pc_cursor_frame();assert(!quick_wheel_only);
+    // Game Over has pause state zero and is neither title nor pause UI. Its
+    // native cursor nodes must get hover/help and one confirm, without touching
+    // loaded background screens or replaying stationary hover callbacks.
+    pc_cursor_reset();test_menu_ui=false;ST8(header+0xfe,0);
+    ST64(screen,0x7001cef0a8ull);ST8(screen+0xfe,2);ST8(screen+0xfc,1);
+    ST64(sa+8*0x30,screen);ST32(sm+0x28,0x4b);
+    ST64(screen+0x90,node+0x40);ST32(screen+0x9c,0x40);
+    ST64(node+0x48,other+0x40);ST64(other+0x48,screen+0x88);
+    uint64_t second_button=GUEST_LO+0x6000,second_pane=GUEST_LO+0x6200;
+    ST64(node,nvt);ST64(node+0x18,button);ST64(node+0x20,screen);ST64(button+0x60,pane);
+    ST64(other,nvt);ST64(other+0x18,second_button);ST64(other+0x20,screen);ST64(second_button+0x60,second_pane);
+    for(int i=0;i<2;i++) {
+        uint64_t p=i?second_pane:pane;
+        *(float*)(p+0x7c)=0;*(float*)(p+0x8c)=i?-154:-96;
+        *(float*)(p+0x50)=264;*(float*)(p+0x54)=54;
+        *(float*)(p+0x70)=*(float*)(p+0x84)=1;
+        *(float*)(p+0x74)=*(float*)(p+0x80)=0;
+    }
+    pc_cursor_frame();assert(game_over_screen==screen&&pc_cursor_active()&&!dialogue_active);
+    position_inside=true;point[0]=0;point[1]=-96;motion_at=now;sampled_frame=frame;
+    cpu.x[0]=manager;cpu.x[1]=0;ST64(control+0x48,0);
+    unsigned old_activations=activations;
+    rt_pc_cursor_manager(&cpu,0x7000f57da8,0x7000123404);
+    assert(activated_node==node&&activations==old_activations+1);
+    for(int i=0;i<60;i++)rt_pc_cursor_manager(&cpu,0x7000f57da8,0x7000123404);
+    assert(activations==old_activations+1);
+    point[1]=-154;click_pending=true;
+    rt_pc_cursor_manager(&cpu,0x7000f57da8,0x7000123404);
+    assert(activated_node==other&&LD32(manager+0x10)==1&&!click_pending);
+    // Quit opens a different screen over Game Over. Its nodes must own hover
+    // and clicks; the underlying Continue/Quit controls must not steal focus.
+    uint64_t modal=GUEST_LO+0xa000,modal_node=GUEST_LO+0xe000,modal_button=GUEST_LO+0xe200,modal_pane=GUEST_LO+0xe400;
+    ST64(sa+8*0x39,modal);ST64(modal,0x7001cfffe0ull);ST8(modal+0xfe,2);ST8(modal+0xfc,1);ST64(modal+0x28,ui);
+    ST32(modal+0x9c,0x40);ST64(modal+0x90,modal_node+0x40);ST64(modal_node+0x48,modal+0x88);
+    ST64(modal_node,nvt);ST64(modal_node+0x18,modal_button);ST64(modal_node+0x20,modal);ST64(modal_button+0x60,modal_pane);
+    memcpy((void*)(uintptr_t)modal_pane,(void*)(uintptr_t)second_pane,0x100);
+    *(float*)(modal_pane+0x8c)=-154;pc_cursor_frame();assert(game_over_screen==modal);
+    click_pending=true;rt_pc_cursor_manager(&cpu,0x7000f57da8,0x7000123404);
+    assert(activated_node==modal_node&&LD32(manager+0x10)==1&&!click_pending);
+    ST64(sa+8*0x39,0);pc_cursor_frame();assert(game_over_screen==screen);
+    rt_pc_cursor_manager(&cpu,0x7000f57da8,0x7000123404);assert(activated_node==other);
+    g_settings.pc_cursor=false;pc_cursor_frame();assert(!pc_cursor_active());
+    g_settings.pc_cursor=true;ST64(sa+8*0x30,0);pc_cursor_frame();assert(!game_over_screen&&!pc_cursor_active());
     puts("PASS: Options scroll/click/shared focus, SDL ownership/cursor visibility, page rebuild, Adventure Log/Ability Controls list registry, stationary hover, nested category clicks/locks, viewport preservation, pause header transitions/modal priority, setting gate and reboot reset (synthetic host state).");
 #ifdef _WIN32
     VirtualFree(vt_memory,0,MEM_RELEASE);
